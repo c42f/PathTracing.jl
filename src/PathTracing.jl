@@ -10,6 +10,8 @@ using StaticArrays, LinearAlgebra, PNGFiles, Random, Colors
 
 const Vec = SVector{3,Float64}
 const V = SA{Float64}
+const C = SA{Float32}
+const CVec = SVector{3,Float32}
 
 struct Ray
     o::Vec # Origin
@@ -21,8 +23,8 @@ end
 struct Sphere
     rad::Float64
     p::Vec  # Position
-    e::Vec  # Emission
-    c::Vec  # Color
+    e::CVec # Emission
+    c::CVec # Color
     refl::Refl_t
 end
 
@@ -60,7 +62,7 @@ clamp01(x) = clamp(x, zero(x), one(x))
 
 function radiance(scene, r::Ray, depth::Int, Xi)
     (did_hit, t, id) = intersect(scene, r)
-    did_hit || return V[0,0,0]      # if miss, return black
+    did_hit || return C[0,0,0]      # if miss, return black
     obj = scene[id]                 # the hit object
     x = r.o + r.d*t
     n = normalize(x-obj.p)
@@ -114,23 +116,24 @@ function radiance(scene, r::Ray, depth::Int, Xi)
     end
 end
 
-function main(scene, w, h, samps)
+function render(scene, w, h, samps)
     subpix_samps = samps ÷ 4
     cam = Ray(V[50,52,295.6], normalize(V[0,-0.042612,-1])) # cam pos, dir
     cx = 0.5135 * V[w/h, 0, 0]
     cy = 0.5135 * normalize(cx × cam.d)
-    c = zeros(Vec, w, h)
+    c = zeros(CVec, w, h)
     Xi = Random.GLOBAL_RNG # TODO: row-based seeding for multithreading
     rowcount = Threads.Atomic{Int}(0)
-    Threads.@threads for y = 1:h # Loop over image rows
+    for y = 1:h # Loop over image rows
         rowcount[] += 1
-        @info "Rendering ($samps spp)" progress=(rowcount[])/h
+        #@info "Rendering ($samps spp)" progress=(rowcount[])/h
         for x = 1:w # Loop cols
             # Xi = Random.MersenneTwister(y^3)
             for sy = 0:1      # 2x2 subpixel rows
                 for sx = 0:1  # 2x2 subpixel cols
                     r = V[0,0,0]
                     for _ = 1:subpix_samps
+                        # Bilinear (tent) filter for subpixels
                         r1 = 2*rand(Xi)
                         r2 = 2*rand(Xi)
                         dx = r1 < 1 ? sqrt(r1)-1 : 1-sqrt(2-r1)
@@ -145,45 +148,36 @@ function main(scene, w, h, samps)
             end
         end
     end
-    to_color(v) = RGB(clamp01.(v).^(1/2.2)...)
-    PNGFiles.save("image.png", to_color.(permutedims(reverse(c, dims=2))), filters=0)
+    c
 end
 
-spheres = [ # Scene: radius, position, emission, color, material
-    Sphere(1e5,  V[ 1e5+1,40.8,81.6],  V[0,0,0],    V[.75,.25,.25], DIFF), #Left
-    Sphere(1e5,  V[-1e5+99,40.8,81.6], V[0,0,0],    V[.25,.25,.75], DIFF), #Rght
-    Sphere(1e5,  V[50,40.8, 1e5],      V[0,0,0],    V[.75,.75,.75], DIFF), #Back
-    Sphere(1e5,  V[50,40.8,-1e5+170],  V[0,0,0],    V[0,0,0],       DIFF), #Frnt
-    Sphere(1e5,  V[50, 1e5, 81.6],     V[0,0,0],    V[.75,.75,.75], DIFF), #Botm
-    Sphere(1e5,  V[50,-1e5+81.6,81.6], V[0,0,0],    V[.75,.75,.75], DIFF), #Top
-    Sphere(16.5, V[27,16.5,47],        V[0,0,0],    V[1,1,1]*0.999, SPEC), #Mirr
-    Sphere(16.5, V[73,16.5,78],        V[0,0,0],    V[1,1,1]*0.999, REFR), #Glas
-    Sphere(600,  V[50,681.6-.27,81.6], V[12,12,12], V[0,0,0],       DIFF), #Lite
-]
+to_sRGB(v) = RGB(clamp01.(v).^(1/2.2)...)
 
-# main(spheres, 1024, 768, length(ARGS) == 1 ? parse(Int, ARGS[1])/4 : 1)
-#main(spheres, 128, 96, 4)
-#@time main(spheres, 512, 384, 128)
-#@time main(spheres, 1024, 768, 4)
-#run(`feh image.png`)
-
-#=
-function writeppm(c)
-    w,h = size(c)
-    open("image.ppm", "w") do io
-        write(io, """P3
-                     $w
-                     $h
-                     255
-                     """)
-        for y=1:h, x=1:w
-            # Gamma correction
-            toInt(w) = floor(UInt8, (clamp01(w)^(1/2.2)*255 + .5))
-            g = toInt.(c[x, h-y+1])
-            write(io, "$(g[1]) $(g[2]) $(g[3]) ")
-        end
-    end
+function main()
+    scene = cornell_box_scene()
+    c = render(scene, 128, 96, 128)
+    #c = render(scene, 512, 384, 256)
+    #c = render(scene, 1024, 768, 4)
+    #c = render(scene, 2, 2, 4)
+    img = to_sRGB.(permutedims(reverse(c, dims=2)))
+    # PNGFiles.save("image.png", img, filters=0)
+    img
 end
-=#
+
+function cornell_box_scene()
+    # radius, position, emission, color, material
+    [
+      Sphere(1e5,  V[ 1e5+1,40.8,81.6],  C[0,0,0],    C[.75,.25,.25], DIFF), #Left
+      Sphere(1e5,  V[-1e5+99,40.8,81.6], C[0,0,0],    C[.25,.25,.75], DIFF), #Rght
+      Sphere(1e5,  V[50,40.8, 1e5],      C[0,0,0],    C[.75,.75,.75], DIFF), #Back
+      Sphere(1e5,  V[50,40.8,-1e5+170],  C[0,0,0],    C[0,0,0],       DIFF), #Frnt
+      Sphere(1e5,  V[50, 1e5, 81.6],     C[0,0,0],    C[.75,.75,.75], DIFF), #Botm
+      Sphere(1e5,  V[50,-1e5+81.6,81.6], C[0,0,0],    C[.75,.75,.75], DIFF), #Top
+      Sphere(16.5, V[27,16.5,47],        C[0,0,0],    C[1,1,1]*.999,  SPEC), #Mirr
+      Sphere(16.5, V[73,16.5,78],        C[0,0,0],    C[1,1,1]*.999,  REFR), #Glas
+      Sphere(600,  V[50,681.6-.27,81.6], C[12,12,12], C[0,0,0],       DIFF), #Lite
+      # Sphere( 4.5, V[50,30,62],          C[12,12,12],    C[0,0,0],       DIFF), #Light
+    ]
+end
 
 end
