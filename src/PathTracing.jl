@@ -135,12 +135,12 @@ function main(scene, w, h, samps)
                         r2 = 2*rand(Xi)
                         dx = r1 < 1 ? sqrt(r1)-1 : 1-sqrt(2-r1)
                         dy = r2 < 1 ? sqrt(r2)-1 : 1-sqrt(2-r2)
-                        d = cx*(((sx + 0.5 + dx)/2 + x-1)/w - 0.5) +
-                            cy*(((sy + 0.5 + dy)/2 + y-1)/h - 0.5) + cam.d
-                        r += radiance(scene, Ray(cam.o + d*140, normalize(d)), 0, Xi)*(1.0/subpix_samps)
+                        d = normalize(cx*(((sx + 0.5 + dx)/2 + x-1)/w - 0.5) +
+                                      cy*(((sy + 0.5 + dy)/2 + y-1)/h - 0.5) + cam.d)
+                        r += radiance(scene, Ray(cam.o + d*140, d), 0, Xi)
                         # Camera rays are pushed ^^^^^ forward to start in interior
                     end
-                    c[x,y] += 0.25*clamp01.(r)
+                    c[x,y] += 0.25 * clamp01.((1.00/subpix_samps) .* r)
                 end 
             end
         end
