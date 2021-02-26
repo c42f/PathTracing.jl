@@ -124,7 +124,7 @@ function render(scene, w, h, samps)
     c = zeros(CVec, w, h)
     Xi = Random.GLOBAL_RNG # TODO: row-based seeding for multithreading
     rowcount = Threads.Atomic{Int}(0)
-    for y = 1:h # Loop over image rows
+    Threads.@threads for y = 1:h # Loop over image rows
         rowcount[] += 1
         #@info "Rendering ($samps spp)" progress=(rowcount[])/h
         for x = 1:w # Loop cols
@@ -143,7 +143,8 @@ function render(scene, w, h, samps)
                         r += radiance(scene, Ray(cam.o + d*140, d), 0, Xi)
                         # Camera rays are pushed ^^^^^ forward to start in interior
                     end
-                    c[x,y] += 0.25 * clamp01.((1.00/subpix_samps) .* r)
+                    # The original includes clamp01 here (bias↑, noise↓)
+                    c[x,y] += 0.25 * (1.00/subpix_samps) .* r
                 end 
             end
         end
@@ -156,7 +157,7 @@ to_sRGB(v) = RGB(clamp01.(v).^(1/2.2)...)
 function main()
     scene = cornell_box_scene()
     c = render(scene, 128, 96, 128)
-    #c = render(scene, 512, 384, 256)
+    #c = render(scene, 512, 384, 4)
     #c = render(scene, 1024, 768, 4)
     #c = render(scene, 2, 2, 4)
     img = to_sRGB.(permutedims(reverse(c, dims=2)))
